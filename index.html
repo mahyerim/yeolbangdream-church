@@ -506,8 +506,8 @@ body.cursor-hover #cursorRing{width:44px;height:44px;border-color:rgba(185,134,5
 <section id="admin" class="section searchable" data-title="관리자기능 관리자 공지 등록 일정 등록 문의 확인 설정">
  <div class="section-head"><div><div class="eyebrow">ADMIN</div><h2>관리자기능</h2></div><p>데모용 브라우저 관리자입니다. 실제 공개 운영에서는 반드시 서버 인증과 데이터베이스를 연결해야 합니다.</p></div>
  <div class="inner admin-shell">
-  <div class="admin-login" id="adminLogin"><h3 style="margin:0">관리자 로그인</h3><p style="font-size:19px;color:#b9c8db">데모 비밀번호: <strong>church2026</strong></p><input id="adminPassword" type="password" placeholder="관리자 비밀번호"><button class="admin-btn pressable" id="adminLoginBtn">로그인</button></div>
-  <div class="admin-area" id="adminArea"><div class="admin-tabs"><button class="admin-tab active pressable" data-tab="noticeAdmin">공지관리</button><button class="admin-tab pressable" data-tab="eventAdmin">일정관리</button><button class="admin-tab pressable" data-tab="worshipAdmin">예배시간</button><button class="admin-tab pressable" data-tab="settingsAdmin">교회정보</button><button class="admin-tab pressable" data-tab="resetAdmin">초기화</button></div>
+  <div class="admin-login" id="adminLogin"><h3 style="margin:0">관리자 로그인</h3><p style="font-size:17px;color:#b9c8db">등록된 관리자 이메일과 비밀번호로 로그인해 주세요.</p><input id="adminEmail" type="email" autocomplete="username" placeholder="관리자 이메일"><input id="adminPassword" type="password" autocomplete="current-password" placeholder="관리자 비밀번호"><button class="admin-btn pressable" id="adminLoginBtn">로그인</button></div>
+  <div class="admin-area" id="adminArea"><div class="admin-tabs"><button class="admin-tab active pressable" data-tab="noticeAdmin">공지관리</button><button class="admin-tab pressable" data-tab="eventAdmin">일정관리</button><button class="admin-tab pressable" data-tab="worshipAdmin">예배시간</button><button class="admin-tab pressable" data-tab="settingsAdmin">교회정보</button><button class="admin-tab pressable" data-tab="resetAdmin">초기화</button><button class="admin-tab pressable" id="adminLogoutBtn" type="button">로그아웃</button></div>
    <div class="admin-panel active" id="noticeAdmin"><h3>공지사항 등록</h3><div class="admin-grid"><label>제목<input id="noticeTitle"></label><label>구분<select id="noticeType"><option value="notice">공지사항</option><option value="news">이번 주 소식</option></select></label></div><label>내용<textarea id="noticeBody"></textarea></label><button class="admin-save pressable" id="addNoticeBtn">등록</button><div class="admin-list" id="adminNoticeList"></div></div>
    <div class="admin-panel" id="eventAdmin"><h3>교회일정 등록</h3><div class="admin-grid"><label>날짜<input id="eventDate" type="date"></label><label>일정명<input id="eventTitle"></label></div><button class="admin-save pressable" id="addEventBtn">일정 추가</button><div class="admin-list" id="adminEventList"></div></div>
    <div class="admin-panel" id="worshipAdmin"><h3>예배시간 수정</h3><div id="adminWorshipFields" class="admin-grid"></div><button class="admin-save pressable" id="saveWorshipBtn">예배시간 저장</button></div>
@@ -525,9 +525,14 @@ body.cursor-hover #cursorRing{width:44px;height:44px;border-color:rgba(185,134,5
 
 <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 const $=(s,c=document)=>c.querySelector(s), $$=(s,c=document)=>[...c.querySelectorAll(s)];
 const KEY='yeolbangDreamChurch_v4';
+const SUPABASE_URL='https://svjcfyfgdqnponoizwud.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY='sb_publishable_PiLiWYGxMFWL_l5d8UbNGA_-uTAJ-P0';
+const ADMIN_UID='ab40a38f-7001-4ffb-a6db-0d04b6c53423';
+const db=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY,{auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:true}});
 const defaults={
  worship:[
   {name:'주일예배',time:'주일 오전 10:30',place:'본당',icon:'church'},
@@ -554,9 +559,34 @@ const defaults={
  inquiries:[],
  settings:{address:'인천광역시 연수구 용담로 42-1 (청학동 468-2)',phone:'',email:'',mapQuery:'인천광역시 연수구 용담로 42-1 열방드림교회'}
 };
-let state=loadState();
-function loadState(){try{return {...structuredClone(defaults),...JSON.parse(localStorage.getItem(KEY)||'{}')}}catch(e){return structuredClone(defaults)}}
-function saveState(){localStorage.setItem(KEY,JSON.stringify(state));}
+let state=structuredClone(defaults);
+let remoteRowId=null;
+function mergeState(data){
+ const base=structuredClone(defaults);
+ if(!data||typeof data!=='object')return base;
+ return {...base,...data,settings:{...base.settings,...(data.settings||{})},worship:Array.isArray(data.worship)?data.worship:base.worship,notices:Array.isArray(data.notices)?data.notices:base.notices,events:Array.isArray(data.events)?data.events:base.events,inquiries:Array.isArray(data.inquiries)?data.inquiries:base.inquiries};
+}
+async function loadState(){
+ try{
+  const {data,error}=await db.from('site_settings').select('id,value,updated_at').eq('key','app_state').order('updated_at',{ascending:false}).limit(1);
+  if(error)throw error;
+  if(data&&data.length){remoteRowId=data[0].id;state=mergeState(JSON.parse(data[0].value||'{}'));localStorage.setItem(KEY,JSON.stringify(state));return true;}
+ }catch(e){console.warn('Supabase load failed:',e);}
+ try{state=mergeState(JSON.parse(localStorage.getItem(KEY)||'{}'));}catch(e){state=structuredClone(defaults)}
+ return false;
+}
+async function saveState(){
+ localStorage.setItem(KEY,JSON.stringify(state));
+ const {data:{user}}=await db.auth.getUser();
+ if(!user||user.id!==ADMIN_UID)throw new Error('관리자 로그인이 필요합니다.');
+ const payload={key:'app_state',value:JSON.stringify(state),category:'site',updated_at:new Date().toISOString()};
+ if(remoteRowId){
+  const {error}=await db.from('site_settings').update(payload).eq('id',remoteRowId);if(error)throw error;
+ }else{
+  const {data,error}=await db.from('site_settings').insert(payload).select('id').single();if(error)throw error;remoteRowId=data.id;
+ }
+ return true;
+}
 function uid(){return Date.now()+Math.floor(Math.random()*1000)}
 function fmtDate(s){const d=new Date(s);return `${d.getFullYear()}.${String(d.getMonth()+1).padStart(2,'0')}.${String(d.getDate()).padStart(2,'0')}`}
 function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200)}
@@ -626,12 +656,24 @@ async function sha256(text){const data=new TextEncoder().encode(text);const dige
 function makeTicket(){const d=new Date();const ds=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;return `YD-${ds}-${Math.floor(1000+Math.random()*9000)}`}
 
 // Admin actions
-function adminLogin(){if($('#adminPassword').value==='church2026'){$('#adminLogin').style.display='none';$('#adminArea').classList.add('active');renderAll();toast('관리자 모드로 로그인했습니다.')}else toast('비밀번호가 올바르지 않습니다.')}
-function addNotice(){const title=$('#noticeTitle').value.trim(),body=$('#noticeBody').value.trim(),type=$('#noticeType').value;if(!title){toast('공지 제목을 입력해 주세요.');return}state.notices.push({id:uid(),type,title,body,date:new Date().toISOString()});saveState();$('#noticeTitle').value='';$('#noticeBody').value='';renderNews();toast('등록되었습니다.')}
-function addEvent(){const date=$('#eventDate').value,title=$('#eventTitle').value.trim();if(!date||!title){toast('날짜와 일정명을 입력해 주세요.');return}state.events.push({id:uid(),date,title});saveState();$('#eventTitle').value='';renderCalendar();renderAdminEvents();toast('일정이 추가되었습니다.')}
-function saveWorship(){$$('[data-worship]').forEach(i=>state.worship[+i.dataset.worship].time=i.value.trim());saveState();renderWorship();toast('예배시간을 저장했습니다.')}
-function saveSettings(){state.settings={address:$('#settingAddress').value.trim(),phone:$('#settingPhone').value.trim(),email:$('#settingEmail').value.trim(),mapQuery:$('#settingMapQuery').value.trim()};saveState();renderSettings();toast('교회 정보를 저장했습니다.')}
-function resetAll(){if(!confirm('데모 데이터를 모두 초기화할까요?'))return;localStorage.removeItem(KEY);state=structuredClone(defaults);renderAll();toast('초기화했습니다.')}
+async function adminLogin(){
+ const email=$('#adminEmail').value.trim(),password=$('#adminPassword').value;
+ if(!email||!password){toast('관리자 이메일과 비밀번호를 입력해 주세요.');return}
+ const btn=$('#adminLoginBtn');btn.disabled=true;btn.textContent='로그인 중…';
+ try{
+  const {data,error}=await db.auth.signInWithPassword({email,password});if(error)throw error;
+  if(!data.user||data.user.id!==ADMIN_UID){await db.auth.signOut();throw new Error('관리자 권한이 없는 계정입니다.');}
+  $('#adminLogin').style.display='none';$('#adminArea').classList.add('active');$('#adminPassword').value='';renderAll();toast('관리자 모드로 로그인했습니다.');
+ }catch(e){toast(e.message==='Invalid login credentials'?'이메일 또는 비밀번호가 올바르지 않습니다.':(e.message||'로그인에 실패했습니다.'));}
+ finally{btn.disabled=false;btn.textContent='로그인'}
+}
+async function adminLogout(){await db.auth.signOut();$('#adminArea').classList.remove('active');$('#adminLogin').style.display='block';toast('로그아웃했습니다.');}
+async function persistOrToast(successMsg){try{await saveState();toast(successMsg);return true}catch(e){console.error(e);toast('저장 실패: '+(e.message||'Supabase 연결을 확인해 주세요.'));return false}}
+async function addNotice(){const title=$('#noticeTitle').value.trim(),body=$('#noticeBody').value.trim(),type=$('#noticeType').value;if(!title){toast('공지 제목을 입력해 주세요.');return}state.notices.push({id:uid(),type,title,body,date:new Date().toISOString()});if(await persistOrToast('등록되었습니다.')){$('#noticeTitle').value='';$('#noticeBody').value='';renderNews();}else state.notices.pop();}
+async function addEvent(){const date=$('#eventDate').value,title=$('#eventTitle').value.trim();if(!date||!title){toast('날짜와 일정명을 입력해 주세요.');return}const item={id:uid(),date,title};state.events.push(item);if(await persistOrToast('일정이 추가되었습니다.')){$('#eventTitle').value='';renderCalendar();renderAdminEvents();}else state.events=state.events.filter(x=>x!==item);}
+async function saveWorship(){const before=structuredClone(state.worship);$$('[data-worship]').forEach(i=>state.worship[+i.dataset.worship].time=i.value.trim());if(await persistOrToast('예배시간을 저장했습니다.'))renderWorship();else{state.worship=before;renderWorship();}}
+async function saveSettings(){const before={...state.settings};state.settings={address:$('#settingAddress').value.trim(),phone:$('#settingPhone').value.trim(),email:$('#settingEmail').value.trim(),mapQuery:$('#settingMapQuery').value.trim()};if(await persistOrToast('교회 정보를 저장했습니다.'))renderSettings();else{state.settings=before;renderSettings();}}
+async function resetAll(){if(!confirm('공지, 일정, 예배시간, 교회 기본정보를 최초 상태로 되돌릴까요?'))return;const before=structuredClone(state);state=structuredClone(defaults);if(await persistOrToast('초기화했습니다.'))renderAll();else{state=before;renderAll();}}
 
 function renderAll(){renderWorship();renderNews();renderCalendar();renderAdminEvents();renderInquiries();renderSettings();lucide.createIcons();}
 function bindPress(){$$('.pressable').forEach(el=>{if(el.dataset.pressBound)return;el.dataset.pressBound='1';const on=()=>el.classList.add('is-pressed'),off=()=>el.classList.remove('is-pressed');el.addEventListener('mousedown',on);el.addEventListener('mouseup',off);el.addEventListener('mouseleave',off);el.addEventListener('touchstart',on,{passive:true});el.addEventListener('touchend',off,{passive:true});});}
@@ -644,11 +686,21 @@ $('#mobileMenuBtn').addEventListener('click',()=>$('#mainNav').classList.toggle(
 $('#prevMonth').addEventListener('click',()=>{viewDate.setMonth(viewDate.getMonth()-1);renderCalendar()});$('#nextMonth').addEventListener('click',()=>{viewDate.setMonth(viewDate.getMonth()+1);renderCalendar()});
 $('#addressSearchBtn').addEventListener('click',()=>geocode($('#addressInput').value));$('#copyAddressBtn').addEventListener('click',async()=>{try{await navigator.clipboard.writeText('인천광역시 연수구 용담로 42-1');toast('주소를 복사했습니다.')}catch(e){toast('주소: 인천광역시 연수구 용담로 42-1')}});
 $('#contactForm').addEventListener('submit',e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const name=String(fd.get('name')||'').trim();const category=String(fd.get('category')||'').trim();const message=String(fd.get('message')||'').trim();if(!name||!message){toast('이름과 문의 내용을 입력해 주세요.');return}const body=`[열방드림교회 문자 문의]\n이름: ${name}\n문의유형: ${category}\n문의 내용: ${message}`;window.location.href=`sms:01082403623?body=${encodeURIComponent(body)}`;toast('문자 앱을 여는 중입니다.')});
-$('#adminLoginBtn').addEventListener('click',adminLogin);$('#adminPassword').addEventListener('keydown',e=>{if(e.key==='Enter')adminLogin()});$('#addNoticeBtn').addEventListener('click',addNotice);$('#addEventBtn').addEventListener('click',addEvent);$('#saveWorshipBtn').addEventListener('click',saveWorship);$('#saveSettingsBtn').addEventListener('click',saveSettings);$('#resetBtn').addEventListener('click',resetAll);
+$('#adminLoginBtn').addEventListener('click',adminLogin);$('#adminPassword').addEventListener('keydown',e=>{if(e.key==='Enter')adminLogin()});$('#adminEmail').addEventListener('keydown',e=>{if(e.key==='Enter')adminLogin()});$('#adminLogoutBtn').addEventListener('click',adminLogout);$('#addNoticeBtn').addEventListener('click',addNotice);$('#addEventBtn').addEventListener('click',addEvent);$('#saveWorshipBtn').addEventListener('click',saveWorship);$('#saveSettingsBtn').addEventListener('click',saveSettings);$('#resetBtn').addEventListener('click',resetAll);
 $$('.admin-tab').forEach(b=>b.addEventListener('click',()=>{$$('.admin-tab').forEach(x=>x.classList.remove('active'));$$('.admin-panel').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.tab).classList.add('active')}));
-document.addEventListener('click',e=>{const n=e.target.closest('[data-delete-notice]');if(n){state.notices=state.notices.filter(x=>x.id!=n.dataset.deleteNotice);saveState();renderNews();toast('삭제했습니다.')}const ev=e.target.closest('[data-delete-event]');if(ev){state.events=state.events.filter(x=>x.id!=ev.dataset.deleteEvent);saveState();renderCalendar();renderAdminEvents();toast('일정을 삭제했습니다.')}const iq=e.target.closest('[data-delete-inquiry]');if(iq){state.inquiries=state.inquiries.filter(x=>x.id!=iq.dataset.deleteInquiry);saveState();renderInquiries();toast('문의를 삭제했습니다.')}});
+document.addEventListener('click',async e=>{
+ const n=e.target.closest('[data-delete-notice]');if(n){const before=structuredClone(state.notices);state.notices=state.notices.filter(x=>x.id!=n.dataset.deleteNotice);if(await persistOrToast('삭제했습니다.'))renderNews();else state.notices=before;}
+ const ev=e.target.closest('[data-delete-event]');if(ev){const before=structuredClone(state.events);state.events=state.events.filter(x=>x.id!=ev.dataset.deleteEvent);if(await persistOrToast('일정을 삭제했습니다.')){renderCalendar();renderAdminEvents();}else state.events=before;}
+ const iq=e.target.closest('[data-delete-inquiry]');if(iq){const before=structuredClone(state.inquiries);state.inquiries=state.inquiries.filter(x=>x.id!=iq.dataset.deleteInquiry);if(await persistOrToast('문의를 삭제했습니다.'))renderInquiries();else state.inquiries=before;}
+});
 
-renderAll();bindPress();bindCursor();bindNavHighlight();initMap();
+async function initApp(){
+ await loadState();renderAll();bindPress();bindCursor();bindNavHighlight();initMap();
+ const {data:{session}}=await db.auth.getSession();
+ if(session?.user?.id===ADMIN_UID){$('#adminLogin').style.display='none';$('#adminArea').classList.add('active');}
+ db.auth.onAuthStateChange((_event,session)=>{if(!session||session.user.id!==ADMIN_UID){$('#adminArea').classList.remove('active');$('#adminLogin').style.display='block';}});
+}
+initApp();
 </script>
 </body>
 </html>
